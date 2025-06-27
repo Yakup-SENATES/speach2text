@@ -111,8 +111,8 @@ async def home():
         'index2.html'
     )
 
-@app.route('/deepseek_speak', methods=['POST'])
-async def deepseek_speak():
+@app.route('/ai_speak', methods=['POST'])
+async def ai_speak():
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file'}), 400
 
@@ -144,7 +144,7 @@ async def deepseek_speak():
         return jsonify({'audio_url': f'/static/audio/{filename_tts}'})
 
     except Exception as e:
-        logging.exception("Error in deepseek_speak:")
+        logging.exception("Error in ai_speak:")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

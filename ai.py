@@ -74,8 +74,8 @@ def home():
     return render_template('index2.html')
 
 
-@app.route('/deepseek_speak', methods=['POST'])
-def deepseek_speak():
+@app.route('/ai_speak', methods=['POST'])
+def ai_speak():
     if 'audio' not in request.files:
         return jsonify({'error': 'Ses dosyasi yok'}), 400
 

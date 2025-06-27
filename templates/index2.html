@@ -142,7 +142,7 @@
                         status.textContent = 'AI düşünüyor...';
 
                         try {
-                            const response = await fetch('/deepseek_speak', { // Düzenlenmiş uç nokta
+                            const response = await fetch('/ai_speak', { // Düzenlenmiş uç nokta
                                 method: 'POST',
                                 body: formData
                             });
@@ -269,7 +269,7 @@
                         status.textContent = 'AI düşünüyor...';
 
                         try {
-                            const response = await fetch('/deepseek_speak', { // Düzenlenmiş uç nokta
+                            const response = await fetch('/ai_speak', { // Düzenlenmiş uç nokta
                                 method: 'POST',
                                 body: formData
                             });
