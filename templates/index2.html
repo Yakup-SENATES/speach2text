@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Asistan</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Özel stiller (Tailwind'i geçersiz kilmak için) */
+        body {
+            font-family: 'Roboto', sans-serif;
+            /* Daha modern bir font */
+        }
+
+        .glassmorphism {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(8.5px);
+            -webkit-backdrop-filter: blur(8.5px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Dalgali animasyon */
+        @keyframes wave {
+            0% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-5px);
+            }
+
+            100% {
+                transform: translateY(0);
+            }
+        }
+
+        .waving-button {
+            animation: wave 2s linear infinite;
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+
+<body class="bg-gray-900 text-white min-h-screen flex items-center justify-center py-10">
+    <div class="container mx-auto px-6">
+        <!-- Başlik -->
+        <h1 class="text-4xl font-bold text-center mb-8 text-blue-500 animate-pulse">
+            <span class="text-white">DeepSeek</span> AI Asistan
+        </h1>
+
+        <!-- Ana Kutu (Glassmorphism) -->
+        <div class="glassmorphism max-w-lg mx-auto rounded-3xl p-8 shadow-lg">
+            <div class="space-y-6">
+                <!-- Kayit Kontrolleri -->
+                <div class="flex flex-col items-center">
+                    <button id="recordButton"
+                        class="waving-button bg-gradient-to-r from-purple-500 to-blue-500 hover:from-blue-500 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-full shadow-md transition duration-300">
+                        <i class="fas fa-microphone mr-2"></i>Başlat</button>
+                    <p id="recordingStatus" class="text-gray-300 mt-3"></p>
+
+                    <!-- Ses Görselleştirici (Gizli) -->
+                    <div id="audioVisualizer" class="w-full h-16 bg-gray-700 rounded-lg overflow-hidden mt-4 hidden">
+                        <canvas id="visualizer" width="300" height="60"></canvas>
+                    </div>
+                </div>
+
+                <!-- Hata Ayiklama Bilgisi (Gizli) -->
+                <div id="debugInfo" class="text-xs text-gray-500 mt-2 text-center hidden"></div>
+
+                <!-- Sonuç Alanlari -->
+                <div class="space-y-4">
+                    <!-- Kullanici Girişi -->
+                    <div>
+                        <h3 class="font-semibold text-gray-400 mb-2">Sen:</h3>
+                        <div class="bg-gray-800 rounded-2xl p-4 text-lg shadow-inner">
+                            <p id="originalText" class="text-white break-words"></p>
+                        </div>
+                    </div>
+
+                    <!-- AI Yaniti -->
+                    <div>
+                        <h3 class="font-semibold text-gray-400 mb-2">AI:</h3>
+                        <div class="bg-gray-800 rounded-2xl p-4 text-lg shadow-inner">
+                            <p id="responseText" class="text-green-300 break-words"></p>
+                        </div>
+                        <audio id="responseAudio" controls class="w-full mt-4 hidden"></audio>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Font Awesome ikonlari için (CDN veya yerel dosya olabilir)
+        document.addEventListener('DOMContentLoaded', function () {
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css';
+            link.integrity = 'sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg=='
+            link.crossOrigin = 'anonymous';
+            link.referrerPolicy = 'no-referrer';
+            document.head.appendChild(link);
+        });
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioContext;
+        let analyser;
+        let visualizerContext;
+        let stream;
+
+        function updateDebug(message) {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.textContent = message;
+            console.log("DEBUG:", message);
+        }
+        // to record continuously
+        function startRecording() {
+            const button = document.getElementById('recordButton');
+            const status = document.getElementById('recordingStatus');
+
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(async (stream) => {
+                    await setupAudioContext(stream);
+
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                        updateDebug('Ses verisi kaydediliyor...');
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob);
+
+                        status.textContent = 'AI düşünüyor...';
+
+                        try {
+                            const response = await fetch('/deepseek_speak', { // Düzenlenmiş uç nokta
+                                method: 'POST',
+                                body: formData
+                            });
+                            const data = await response.json();
+
+                            document.getElementById('originalText').textContent = "Sen: " + data.original_text;
+                            document.getElementById('responseText').textContent = "AI: " + data.responseText;
+
+                            if (data.audio_url) {
+                                const audio = document.getElementById('responseAudio');
+                                audio.src = data.audio_url;
+                                audio.classList.remove('hidden');
+                                audio.play();
+                            } else {
+                                console.error("Ses URL'si alinamadi");
+                                updateDebug("Ses URL'si alinamadi!");
+
+                            }
+
+                        } catch (error) {
+                            console.error("DeepSeek Error:", error);
+                            status.textContent = 'Hata oluştu';
+                            updateDebug('AI hatasi: ' + error.message);
+                        } finally {
+                            audioChunks = [];
+
+                        }
+                    };
+                    mediaRecorder.start();
+                    button.textContent = 'Durdur';
+                    status.textContent = 'Dinleniyor...';
+                })
+                .catch((error) => {
+                    console.error("Microphone Access Error:", error);
+                    status.textContent = 'Mikrofon erişimi reddedildi';
+                    updateDebug('Mikrofon hatasi: ' + error.message);
+                });
+        }
+
+        async function setupAudioContext(stream) {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                analyser.fftSize = 2048; // Daha detayli görselleştirme için
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                visualizerContext = document.getElementById('visualizer').getContext('2d');
+                document.getElementById('audioVisualizer').classList.remove('hidden');
+
+                function draw() {
+                    analyser.getByteTimeDomainData(dataArray);
+
+                    visualizerContext.fillStyle = 'rgb(30, 30, 30)'; // Dark background
+                    visualizerContext.fillRect(0, 0, 300, 60);
+
+                    visualizerContext.lineWidth = 2;
+                    visualizerContext.strokeStyle = 'rgb(100, 149, 237)'; // Cornflower blue
+                    visualizerContext.beginPath();
+
+                    const sliceWidth = 300 * 1.0 / bufferLength;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = (v * 30) + 30;
+
+                        if (i === 0) {
+                            visualizerContext.moveTo(x, y);
+                        } else {
+                            visualizerContext.lineTo(x, y);
+                        }
+
+                        x += sliceWidth;
+                    }
+
+                    visualizerContext.lineTo(300, 30);
+                    visualizerContext.stroke();
+                    requestAnimationFrame(draw);
+                }
+
+                draw();
+            } catch (error) {
+                console.error("Audio Context Setup Error:", error);
+                updateDebug("Ses görselleştirme hatasi: " + error.message);
+            }
+        }
+
+        document.getElementById('responseAudio').addEventListener('ended', () => {
+            console.log("Ses çalmayı bitirdi, tekrar kayda başlıyoruz...");
+            startRecording();  // Mikrofonu tekrar başlat
+        });
+
+        document.getElementById('recordButton').addEventListener('click', async () => {
+            const button = document.getElementById('recordButton');
+            const status = document.getElementById('recordingStatus');
+
+            const buttonText = button.textContent.replace(/\s/g, '');
+
+            if (buttonText === 'Başlat') {
+                try {
+                    updateDebug('Mikrofon erişimi isteniyor...');
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    updateDebug('Mikrofon erişimi sağlandi');
+
+                    await setupAudioContext(stream);
+
+                    mediaRecorder = new MediaRecorder(stream);
+
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                        updateDebug('Ses verisi kaydediliyor...');
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        updateDebug('Kayit durduruldu, AI araniyor...');
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob);
+
+                        status.textContent = 'AI düşünüyor...';
+
+                        try {
+                            const response = await fetch('/deepseek_speak', { // Düzenlenmiş uç nokta
+                                method: 'POST',
+                                body: formData
+                            });
+
+                            if (!response.ok) {
+                                const errorText = await response.text();
+                                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                            }
+
+                            const data = await response.json();
+                            document.getElementById('originalText').textContent = "Sen: " + data.original_text; //"Sen:" ekledim
+                            document.getElementById('responseText').textContent = "AI: " + data.responseText;  // "AI:" ekledim
+
+                            if (data.audio_url) {
+                                const audio = document.getElementById('responseAudio');
+                                audio.src = data.audio_url;
+                                audio.classList.remove('hidden'); // Ses kontrolünü göster
+                                audio.play(); // Otomatik oynat
+                            } else {
+                                console.error("Ses URL'si alinamadi");
+                                updateDebug("Ses URL'si alinamadi!");
+                            }
+
+                            status.textContent = 'AI cevapladi!';
+                            updateDebug('AI cevapladi!');
+
+                        } catch (error) {
+                            console.error("DeepSeek Error:", error);
+                            status.textContent = 'Hata oluştu';
+                            updateDebug('AI hatasi: ' + error.message);
+                        } finally {
+                            audioChunks = [];
+                        }
+                    };
+
+                    audioChunks = [];
+                    mediaRecorder.start();
+                    button.textContent = 'Durdur';
+                    status.textContent = 'Dinleniyor...';
+                    updateDebug('Kayit başlatildi');
+                } catch (error) {
+                    console.error("Microphone Access Error:", error);
+                    status.textContent = 'Mikrofon erişimi reddedildi';
+                    updateDebug('Mikrofon hatasi: ' + error.message);
+                }
+            } else {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                    mediaRecorder.stop();
+
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop());
+                    }
+
+                    button.textContent = 'Başlat';
+                    document.getElementById('audioVisualizer').classList.add('hidden');
+                    updateDebug('Kayit durduruldu.');
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>

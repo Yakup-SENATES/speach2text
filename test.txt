@@ -1,0 +1,3 @@
+base_url = https://api.deepseek.com
+
+api_key = sk-8cfc56dfb11147bd9ecc2687705918f9

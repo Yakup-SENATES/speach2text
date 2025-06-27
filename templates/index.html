@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ses Çeviri Uygulamasi</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-3xl font-bold text-center mb-8">Ses Çeviri Uygulamasi</h1>
+        
+        <div class="max-w-md mx-auto bg-white rounded-lg shadow-md p-6">
+            <div class="space-y-4">
+                <!-- Kayit Kontrolleri -->
+                <div class="flex flex-col items-center gap-4">
+                    <button id="recordButton" 
+                            class="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-lg font-medium transition duration-200">Kayit Başlat</button>
+                    <p id="recordingStatus" class="text-gray-600"></p>
+                    <!-- Ses görselleştirmesi için -->
+                    <div id="audioVisualizer" class="w-full h-16 bg-gray-100 rounded hidden">
+                        <canvas id="visualizer" width="300" height="60"></canvas>
+                    </div>
+                </div>
+
+                <!-- Debug bilgisi -->
+                <div id="debugInfo" class="text-xs text-gray-500 mt-2"></div >
+
+                <!-- Sonuçlar -->
+                <div class="mt-8 space-y-4">
+                    <div>
+                        <h3 class="font-medium text-gray-700">Türkçe Metin:</h3>
+                        <p id="originalText" class="mt-2 p-3 bg-gray-50 rounded-lg min-h-[60px]"></p>
+                    </div>
+                    <div>
+                        <h3 class="font-medium text-gray-700">İngilizce Çeviri:</h3>
+                        <p id="translatedText" class="mt-2 p-3 bg-gray-50 rounded-lg min-h-[60px]"></p>
+                        <button id="speakButton" 
+                                class="mt-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded transition duration-200 hidden">
+                            Dinle
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let mediaRecorder;
+        let audioChunks = [];
+        let audioContext;
+        let analyser;
+        let visualizerContext;
+        let stream;  // Stream'i global scope'a taşidim
+        
+        function updateDebug(message) {
+            const debugInfo = document.getElementById('debugInfo');
+            debugInfo.textContent = message;
+            console.log("DEBUG:", message); // Konsola da yazdir
+        }
+
+        async function setupAudioContext(stream) {
+             try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                
+                visualizerContext = document.getElementById('visualizer').getContext('2d');
+                document.getElementById('audioVisualizer').classList.remove('hidden');
+                
+                function draw() {
+                    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                    analyser.getByteTimeDomainData(dataArray);
+                    
+                    visualizerContext.fillStyle = 'rgb(200, 200, 200)';
+                    visualizerContext.fillRect(0, 0, 300, 60);
+                    visualizerContext.lineWidth = 2;
+                    visualizerContext.strokeStyle = 'rgb(0, 0, 0)';
+                    visualizerContext.beginPath();
+                    
+                    const sliceWidth = 300 * 1.0 / dataArray.length;
+                    let x = 0;
+                    
+                    for(let i = 0; i < dataArray.length; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = v * 30 + 30;
+                        
+                        if(i === 0) {
+                            visualizerContext.moveTo(x, y);
+                        } else {
+                            visualizerContext.lineTo(x, y);
+                        }
+                        
+                        x += sliceWidth;
+                    }
+                    
+                    visualizerContext.lineTo(300, 30);
+                    visualizerContext.stroke();
+                    requestAnimationFrame(draw);
+                }
+                
+                draw();
+            } catch (error) {
+                console.error("Audio Context Setup Error:", error);
+                updateDebug("Ses görselleştirme hatasi: " + error.message); // Kullaniciya bilgi ver
+            }
+        }
+        
+        document.getElementById('recordButton').addEventListener('click', async () => {
+            const button = document.getElementById('recordButton');
+            const status = document.getElementById('recordingStatus');
+            console.log("Button Text:", button.textContent);
+            if (button.textContent === 'Kayit Başlat') {
+                try {
+                    updateDebug('Mikrofon erişimi isteniyor...');
+                    stream = await navigator.mediaDevices.getUserMedia({ audio: true }); // Stream'i burada al
+                    updateDebug('Mikrofon erişimi sağlandi');
+                    
+                     await setupAudioContext(stream);
+
+                    mediaRecorder = new MediaRecorder(stream);
+
+                    
+                    mediaRecorder.ondataavailable = (event) => {
+                        audioChunks.push(event.data);
+                        updateDebug('Ses verisi kaydediliyor...');
+                    };
+                    
+                    mediaRecorder.onstop = async () => {
+                        updateDebug('Kayit durduruldu, işleniyor...');
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                        const formData = new FormData();
+                        formData.append('audio', audioBlob);
+                        
+                        status.textContent = 'Ses işleniyor...';
+                        
+                        try {
+                            const response = await fetch('/transcribe', {
+                                method: 'POST',
+                                body: formData
+                            });
+                            
+                            if (!response.ok) {
+                                const errorText = await response.text();  // Hatayi oku
+                                throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                            }
+                            
+                            const data = await response.json();
+                            document.getElementById('originalText').textContent = data.original_text || "Çevrilecek metin yok"; // Boşsa mesaj göster
+                            document.getElementById('translatedText').textContent = data.translated_text || "Çeviri yok"; // Boşsa mesaj göster
+
+                            // Speak Button'i sadece çeviri varsa göster
+                            if (data.translated_text) {
+                                document.getElementById('speakButton').classList.remove('hidden');
+                            } else {
+                                document.getElementById('speakButton').classList.add('hidden');
+                            }
+                            
+                            status.textContent = 'İşlem tamamlandi';
+                            updateDebug('İşlem başariyla tamamlandi');
+                        } catch (error) {
+                            console.error("Transcribe Error:", error);
+                            status.textContent = 'Hata oluştu';
+                            updateDebug('Çeviri hatasi: ' + error.message);
+                        } finally {
+                            audioChunks = []; //Temizle
+                        }
+                    };
+                    
+                    audioChunks = [];
+                    mediaRecorder.start();
+                    button.textContent = 'Kayit Durdur';
+                    status.textContent = 'Kayit yapiliyor...';
+                    updateDebug('Kayit başlatildi');
+                } catch (error) {
+                    console.error("Microphone Access Error:", error);
+                    status.textContent = 'Mikrofon erişimi reddedildi';
+                    updateDebug('Mikrofon hatasi: ' + error.message);
+                }
+            } else {
+                if (mediaRecorder && mediaRecorder.state !== "inactive") { //mediaRecorder tanimli mi kontrolü
+                    mediaRecorder.stop();
+
+                    if (stream) {
+                        stream.getTracks().forEach(track => track.stop()); //Streami durdur
+                    }
+
+                    button.textContent = 'Kayit Başlat';
+                    document.getElementById('audioVisualizer').classList.add('hidden');
+                    updateDebug('Kayit durduruldu, işleniyor...');
+                }
+            }
+        });
+        
+        document.getElementById('speakButton').addEventListener('click', async () => {
+            const text = document.getElementById('translatedText').textContent;
+            updateDebug('Ses oluşturuluyor...');
+            
+            try {
+                const response = await fetch('/speak', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        text: text,
+                        lang: 'en'
+                    })
+                });
+                
+                if (!response.ok) {
+                     const errorText = await response.text();  // Hatayi oku
+                    throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+                }
+                
+                const data = await response.json();
+                if (data.audio_url) { //audio url varsa
+                    const audio = new Audio(data.audio_url);
+                    await audio.play();
+                    updateDebug('Ses oynatildi');
+                }else {
+                    updateDebug('Ses URLsi alinamadi');
+                }
+
+            } catch (error) {
+                console.error("Speak Error:", error);
+                updateDebug('Ses oynatma hatasi: ' + error.message);
+            }
+        });
+    </script>
+</body>
+</html>
